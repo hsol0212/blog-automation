@@ -29,7 +29,15 @@ $env:POST_DATA='data/samduk-chicken.json'; npx playwright test tests/blog-post.s
 npx playwright test tests/naver-test.spec.js --headed --project=chromium
 ```
 
-> 최초 1회는 수동 로그인 후 `context.storageState({ path: 'naver-auth.json' })`로 세션을 저장해 두어야 합니다.
+### 로그인 세션 저장 (최초 1회 / 세션 만료 시)
+
+```bash
+node save-login.js
+```
+
+브라우저가 뜨면 직접 네이버에 로그인(**로그인 상태 유지 체크 권장**)한 뒤, 터미널로 돌아와 Enter를 누르면 `naver-auth.json`이 저장됩니다.
+
+초안 작성이 성공할 때마다 스크립트가 갱신된 쿠키를 `naver-auth.json`에 다시 저장하므로, 주기적으로 돌리는 한 재로그인 없이 이어집니다. 세션이 끊긴 경우에는 5분을 헤매지 않고 즉시 "로그인 세션 만료" 에러로 끝납니다.
 
 ## 트러블슈팅 (핵심 구현 포인트)
 
