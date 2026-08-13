@@ -4,14 +4,32 @@
 //
 // 설계 원칙: 어떤 단계가 실패해도 절대 멈추지 않고 건너뛴 뒤 임시저장까지 간다.
 // 실패한 단계는 콘솔에 '[건너뜀]'으로 남기므로 나중에 초안에서 수동 보완하면 됨.
-import { test } from '@playwright/test';
+import { test as base, chromium } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 
 const DATA_PATH = process.env.POST_DATA || 'data/post.json';
 const data = JSON.parse(fs.readFileSync(DATA_PATH, 'utf8').replace(/^﻿/, ''));
 
-test.use({ storageState: 'naver-auth.json' });
+// 로그인 유지: 매번 빈 컨텍스트 + storageState를 쓰면 네이버가 새 기기로 보고 세션을 자주 끊는다.
+// save-login.js가 만든 크롬 프로필 폴더를 그대로 재사용해서 기기 신뢰 정보까지 유지한다.
+const PROFILE_DIR = path.resolve('.naver-profile');
+
+const test = base.extend({
+  context: async ({}, use) => {
+    const context = await chromium.launchPersistentContext(PROFILE_DIR, {
+      headless: false,
+      viewport: { width: 1280, height: 800 },
+      args: ['--disable-blink-features=AutomationControlled'],
+    });
+    await use(context);
+    await context.close();
+  },
+  page: async ({ context }, use) => {
+    await use(context.pages()[0] || (await context.newPage()));
+  },
+});
+
 test.setTimeout(300000);
 
 async function p(page, text) {
@@ -166,11 +184,17 @@ async function insertLocation(page, frame) {
   return mapDone;
 }
 
-test(`초안 작성: ${data.title}`, async ({ page }) => {
+test(`초안 작성: ${data.title}`, async ({ page, context }) => {
   const kb = page.keyboard;
   await page.goto('https://blog.naver.com/zzul_s?Redirect=Write&');
   await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(3000);
+
+  // 로그인 세션이 끊겼으면 5분 헤매지 말고 즉시 알려주고 끝낸다
+  if (page.url().includes('nid.naver.com')) {
+    throw new Error('네이버 로그인 세션 만료 — `node save-login.js`로 세션을 다시 저장하세요.');
+  }
+
   const frame = page.frameLocator('iframe[name="mainFrame"]');
 
   // 이전 글 복구 팝업 등 닫기
@@ -264,4 +288,12 @@ test(`초안 작성: ${data.title}`, async ({ page }) => {
   await frame.getByRole('button', { name: '저장', exact: true }).click({ timeout: 10000 });
   await page.waitForTimeout(2000);
   console.log('임시저장 완료');
+
+  // 갱신된 로그인 쿠키를 다시 저장해 둔다 (다음 실행 때 재로그인 없이 이어가기 위해)
+  try {
+    await context.storageState({ path: 'naver-auth.json' });
+    console.log('세션 갱신 저장 완료');
+  } catch (e) {
+    console.log('[건너뜀] 세션 갱신 저장 실패:', e.message.split('\n')[0]);
+  }
 });
